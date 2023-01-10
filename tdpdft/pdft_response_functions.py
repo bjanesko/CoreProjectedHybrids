@@ -36,7 +36,6 @@ def pdft_rhf_response(mf, mo_coeff=None, mo_occ=None,
             it is used in TDPDFT response kernel.
     '''
     assert(not isinstance(mf, (uhf.UHF, rohf.ROHF)))
-    #print('All right, fuckers, here we go') 
     if mo_coeff is None: mo_coeff = mf.mo_coeff
     if mo_occ is None: mo_occ = mf.mo_occ
     mol = mf.mol
