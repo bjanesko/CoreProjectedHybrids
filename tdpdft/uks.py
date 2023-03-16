@@ -27,6 +27,7 @@ from pyscf.scf import uhf_symm
 from pyscf.scf import _response_functions  # noqa
 from pyscf.data import nist
 from pyscf.dft.rks import KohnShamDFT
+from pdft.rks import KohnShamPDFT
 from pyscf import __config__
 from tdpdft import pdft_response_functions 
 
@@ -35,12 +36,14 @@ POSTIVE_EIG_THRESHOLD = getattr(__config__, 'tdscf_rhf_TDPDFT_positive_eig_thres
 
 
 class TDA(uhf.TDA):
+    print('Now in tdpdft uks TDA')
     def nuc_grad_method(self):
         from pyscf.grad import tduks
         return tduks.Gradients(self)
 
 class TDPDFT(uhf.TDHF):
-    #print('Now in tdpdft uks TDPDFT')
+    print('Now in tdpdft uks TDPDFT')
+    print('POSTIVE_EIG_THRESHOLD: ',POSTIVE_EIG_THRESHOLD)
     def nuc_grad_method(self):
         from pyscf.grad import tduks
         return tduks.Gradients(self)
@@ -207,7 +210,8 @@ class TDPDFTNoHybrid(TDA):
 
 class dRPA(TDPDFTNoHybrid):
     def __init__(self, mf):
-        if not isinstance(mf, KohnShamDFT):
+        #if not isinstance(mf, KohnShamDFT):
+        if not isinstance(mf, KohnShamPDFT):
             raise RuntimeError("direct RPA can only be applied with DFT; for HF+dRPA, use .xc='hf'")
         mf = scf.addons.convert_to_uhf(mf)
         mf.xc = ''
@@ -217,7 +221,8 @@ TDH = dRPA
 
 class dTDA(TDA):
     def __init__(self, mf):
-        if not isinstance(mf, KohnShamDFT):
+        #if not isinstance(mf, KohnShamDFT):
+        if not isinstance(mf, KohnShamPDFT):
             raise RuntimeError("direct TDA can only be applied with DFT; for HF+dTDA, use .xc='hf'")
         mf = scf.addons.convert_to_uhf(mf)
         mf.xc = ''
@@ -227,7 +232,7 @@ class dTDA(TDA):
 def tdpdft(mf):
     '''Driver to create TDPDFT or TDPDFTNoHybrid object'''
     #print('Now in tdpdft uks tddft with ',mf.phyb)
-    if(mf._numint.libxc.is_hybrid_xc(mf.xc) or mf.phyb>0):
+    if(mf._numint.libxc.is_hybrid_xc(mf.xc) or abs(sum(mf.phyb))>0):
         return TDPDFT(mf)
     else:
         return TDPDFTNoHybrid(mf)

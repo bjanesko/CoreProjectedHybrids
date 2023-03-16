@@ -34,7 +34,7 @@ def TDHF(mf):
     print('Now in tdpdft TDHF')
     if getattr(mf, 'xc', None):
         raise RuntimeError('TDHF does not support DFT object %s' % mf)
-    if isinstance(mf, scf.uhf.UHF):
+    if isinstance(mf, scf.uhf.UHF) or isinstance(mf,scf.rohf.ROHF):
         mf = scf.addons.convert_to_uhf(mf)  # To remove newton decoration
         return uhf.TDHF(mf)
     else:
@@ -43,10 +43,12 @@ def TDHF(mf):
 
 def TDA(mf):
     print('Now in tdpdft TDA')
-    if isinstance(mf, scf.uhf.UHF):
+    #if isinstance(mf, scf.uhf.UHF):
+    if isinstance(mf, scf.uhf.UHF) or isinstance(mf,scf.rohf.ROHF):
         mf = scf.addons.convert_to_uhf(mf)
         #if isinstance(mf, dft.rks.KohnShamDFT):
         if isinstance(mf, pdft.rks.KohnShamPDFT):
+            print('Doing UKS TDA')
             return uks.TDA(mf)
         else:
             return uhf.TDA(mf)
@@ -60,7 +62,8 @@ def TDA(mf):
 
 def TDPDFT(mf):
     print('Now in tdpdft __init__ TDPDFT')
-    if isinstance(mf, scf.uhf.UHF):
+    #if isinstance(mf, scf.uhf.UHF):
+    if isinstance(mf, scf.uhf.UHF) or isinstance(mf,scf.rohf.ROHF):
         mf = scf.addons.convert_to_uhf(mf)
         #if isinstance(mf, dft.rks.KohnShamDFT):
         if isinstance(mf, pdft.rks.KohnShamPDFT):

@@ -31,6 +31,7 @@ from pyscf.scf import hf_symm
 from pyscf.scf import _response_functions  # noqa
 from pyscf.data import nist
 from pyscf.dft.rks import KohnShamDFT
+from pdft.rks import KohnShamPDFT
 from pyscf import __config__
 from tdpdft import pdft_response_functions 
 
@@ -44,6 +45,8 @@ class TDA(rhf.TDA):
         return tdrks.Gradients(self)
 
 class TDPDFT(rhf.TDHF):
+    print('Now in tdpdft rks TDPDFT')
+    print('POSTIVE_EIG_THRESHOLD: ',POSTIVE_EIG_THRESHOLD)
     def nuc_grad_method(self):
         from pyscf.grad import tdrks
         return tdrks.Gradients(self)
@@ -89,6 +92,7 @@ class TDPDFTNoHybrid(TDA):
 
         # BGJ 
         # vresp = mf.gen_response(singlet=singlet, hermi=1)
+        print('Defining vresp in TDPDFTNoHybrid')
         vresp = pdft_response_functions.pdft_rhf_response(mf, singlet=singlet, hermi=1)
 
         def vind(zs):
@@ -132,6 +136,9 @@ class TDPDFTNoHybrid(TDA):
 
         def pickeig(w, v, nroots, envs):
             idx = numpy.where(w > POSTIVE_EIG_THRESHOLD**2)[0]
+            print('PICKING EIGENVALUES')
+            print(w)
+            print(idx)
             return w[idx], v[:,idx], idx
 
         self.converged, w2, x1 = \
@@ -177,7 +184,8 @@ class TDPDFTNoHybrid(TDA):
 
 class dRPA(TDPDFTNoHybrid):
     def __init__(self, mf):
-        if not isinstance(mf, KohnShamDFT):
+        #if not isinstance(mf, KohnShamDFT):
+        if not isinstance(mf, KohnShamPDFT):
             raise RuntimeError("direct RPA can only be applied with DFT; for HF+dRPA, use .xc='hf'")
         mf = scf.addons.convert_to_rhf(mf)
         # commit fc8d1967995b7e033b60d4428ddcca87aac78e4f handles xc='' .
@@ -190,7 +198,8 @@ TDH = dRPA
 
 class dTDA(TDA):
     def __init__(self, mf):
-        if not isinstance(mf, KohnShamDFT):
+        #if not isinstance(mf, KohnShamDFT):
+        if not isinstance(mf, KohnShamPDFT):
             raise RuntimeError("direct TDA can only be applied with DFT; for HF+dTDA, use .xc='hf'")
         mf = scf.addons.convert_to_rhf(mf)
         # commit fc8d1967995b7e033b60d4428ddcca87aac78e4f handles xc='' .
@@ -203,7 +212,7 @@ class dTDA(TDA):
 def tdpdft(mf):
     '''Driver to create TDPDFT or TDPDFTNoHybrid object'''
     #print('Now in tdpdft rks tddft with ',mf.phyb)
-    if(mf._numint.libxc.is_hybrid_xc(mf.xc) or mf.phyb>0):
+    if(mf._numint.libxc.is_hybrid_xc(mf.xc) or abs(sum(mf.phyb))>0):
         return TDPDFT(mf)
     else:
         return TDPDFTNoHybrid(mf)

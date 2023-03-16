@@ -52,11 +52,13 @@ def gen_tda_operation(mf, fock_ao=None, wfnsym=None):
     nao, nmo = mo_coeff[0].shape
     occidxa = numpy.where(mo_occ[0]>0)[0]
     occidxb = numpy.where(mo_occ[1]>0)[0]
-    if(mf.rew is not None): 
-      occidxa = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy[0],mo_energy<mf.rew[1]))[0]
-      occidxb = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy[1],mo_energy<mf.rew[1]))[0]
+    if(hasattr(mf,'rew')):
+     if(mf.rew is not None): 
+      occidxa = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy[0],mo_energy[0]<mf.rew[1]))[0]
+      occidxb = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy[1],mo_energy[1]<mf.rew[1]))[0]
     viridxa = numpy.where(mo_occ[0]==0)[0]
     viridxb = numpy.where(mo_occ[1]==0)[0]
+    print('gen_tda_operation occ',occidxa)
     nocca = len(occidxa)
     noccb = len(occidxb)
     nvira = len(viridxa)
@@ -85,7 +87,9 @@ def gen_tda_operation(mf, fock_ao=None, wfnsym=None):
 
     mem_now = lib.current_memory()[0]
     max_memory = max(2000, mf.max_memory*.8-mem_now)
-    vresp = mf.gen_response(hermi=0, max_memory=max_memory)
+    # BGJ 
+    #vresp = mf.gen_response(hermi=0, max_memory=max_memory)
+    vresp = pdft_response_functions.pdft_uhf_response(mf, hermi=0, max_memory=max_memory)
 
     def vind(zs):
         zs = numpy.asarray(zs)
@@ -97,6 +101,9 @@ def gen_tda_operation(mf, fock_ao=None, wfnsym=None):
         zb = zs[:,nocca*nvira:].reshape(-1,noccb,nvirb)
         dmova = lib.einsum('xov,po,qv->xpq', za, orboa, orbva.conj())
         dmovb = lib.einsum('xov,po,qv->xpq', zb, orbob, orbvb.conj())
+        # BGJ fix 
+        dmova = numpy.ascontiguousarray(dmova)
+        dmovb = numpy.ascontiguousarray(dmovb)
 
         v1ao = vresp(numpy.asarray((dmova,dmovb)))
 
@@ -133,11 +140,12 @@ def get_ab(mf, mo_energy=None, mo_coeff=None, mo_occ=None):
     nao = mol.nao_nr()
     occidx_a = numpy.where(mo_occ[0]==1)[0]
     viridx_a = numpy.where(mo_occ[0]==0)[0]
-    if(mf.rew is not None): 
-      occidx_a = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy[0],mo_energy<mf.rew[1]))[0]
-      occidx_b = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy[1],mo_energy<mf.rew[1]))[0]
     occidx_b = numpy.where(mo_occ[1]==1)[0]
     viridx_b = numpy.where(mo_occ[1]==0)[0]
+    if(hasattr(mf,'rew')):
+     if(mf.rew is not None): 
+      occidx_a = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy[0],mo_energy[0]<mf.rew[1]))[0]
+      occidx_b = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy[1],mo_energy[1]<mf.rew[1]))[0]
     orbo_a = mo_coeff[0][:,occidx_a]
     orbv_a = mo_coeff[0][:,viridx_a]
     orbo_b = mo_coeff[1][:,occidx_b]
@@ -370,6 +378,12 @@ def get_nto(tdobj, state=1, threshold=OUTPUT_THRESHOLD, verbose=None):
     orbv_a = mo_coeff[0][:,mo_occ[0]==0]
     orbo_b = mo_coeff[1][:,mo_occ[1]==1]
     orbv_b = mo_coeff[1][:,mo_occ[1]==0]
+    if(hasattr(mf,'rew')):
+     if(mf.rew is not None): 
+      occidxa = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy[0],mo_energy[0]<mf.rew[1]))[0]
+      occidxb = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy[1],mo_energy[1]<mf.rew[1]))[0]
+      orbo_a = mo_coeff[0][:,occidxa]
+      orbo_b = mo_coeff[1][:,occidxb]
     nocc_a = orbo_a.shape[1]
     nvir_a = orbv_a.shape[1]
     nocc_b = orbo_b.shape[1]
@@ -386,6 +400,10 @@ def get_nto(tdobj, state=1, threshold=OUTPUT_THRESHOLD, verbose=None):
         v_sym_a = orbsyma[mo_occ[0]==0]
         o_sym_b = orbsymb[mo_occ[1]==1]
         v_sym_b = orbsymb[mo_occ[1]==0]
+        if(hasattr(mf,'rew')):
+         if(mf.rew is not None): 
+           o_sym_a = orbsyma[occidxa]
+           o_sym_b = orbsymb[occidxb]
         nto_o_a = numpy.eye(nocc_a)
         nto_v_a = numpy.eye(nvir_a)
         nto_o_b = numpy.eye(nocc_b)
@@ -499,9 +517,17 @@ def analyze(tdobj, verbose=None):
     log = logger.new_logger(tdobj, verbose)
     mol = tdobj.mol
     mo_coeff = tdobj._scf.mo_coeff
+    mf= tdobj._scf
+    mo_energy =mf= tdobj._scf.mo_energy
     mo_occ = tdobj._scf.mo_occ
     nocc_a = numpy.count_nonzero(mo_occ[0] == 1)
     nocc_b = numpy.count_nonzero(mo_occ[1] == 1)
+    if(hasattr(mf,'rew')):
+     if(mf.rew is not None): 
+      occidxa = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy[0],mo_energy[0]<mf.rew[1]))[0]
+      occidxb = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy[1],mo_energy[1]<mf.rew[1]))[0]
+      nocc_a = len(occidxa)
+      nocc_b = len(occidxb)
 
     e_ev = numpy.asarray(tdobj.e) * nist.HARTREE2EV
     e_wn = numpy.asarray(tdobj.e) * nist.HARTREE2WAVENUMBER
@@ -571,12 +597,20 @@ def analyze(tdobj, verbose=None):
 
 def _contract_multipole(tdobj, ints, hermi=True, xy=None):
     if xy is None: xy = tdobj.xy
+    mf = tdobj._scf
     mo_coeff = tdobj._scf.mo_coeff
     mo_occ = tdobj._scf.mo_occ
+    mo_energy = tdobj._scf.mo_energy
     orbo_a = mo_coeff[0][:,mo_occ[0]==1]
     orbv_a = mo_coeff[0][:,mo_occ[0]==0]
     orbo_b = mo_coeff[1][:,mo_occ[1]==1]
     orbv_b = mo_coeff[1][:,mo_occ[1]==0]
+    if(hasattr(mf,'rew')):
+     if(mf.rew is not None): 
+      occidxa = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy[0],mo_energy[0]<mf.rew[1]))[0]
+      occidxb = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy[1],mo_energy[1]<mf.rew[1]))[0]
+      orbo_a = mo_coeff[0][:,occidxa]
+      orbo_b = mo_coeff[1][:,occidxb]
 
     ints_a = numpy.einsum('...pq,pi,qj->...ij', ints, orbo_a.conj(), orbv_a)
     ints_b = numpy.einsum('...pq,pi,qj->...ij', ints, orbo_b.conj(), orbv_b)
@@ -633,6 +667,10 @@ class TDA(rhf.TDA):
         mo_occ = mf.mo_occ
         occidxa = numpy.where(mo_occ[0]>0)[0]
         occidxb = numpy.where(mo_occ[1]>0)[0]
+        if(hasattr(mf,'rew')):
+         if(mf.rew is not None): 
+          occidxa = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy[0],mo_energy[0]<mf.rew[1]))[0]
+          occidxb = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy[1],mo_energy[1]<mf.rew[1]))[0]
         viridxa = numpy.where(mo_occ[0]==0)[0]
         viridxb = numpy.where(mo_occ[1]==0)[0]
         e_ia_a = (mo_energy[0][viridxa,None] - mo_energy[0][occidxa]).T
@@ -665,7 +703,7 @@ class TDA(rhf.TDA):
     def kernel(self, x0=None, nstates=None):
         '''TDA diagonalization solver
         '''
-        cpu0 = (time.clock(), time.time())
+        #cpu0 = (time.clock(), time.time())
         self.check_sanity()
         self.dump_flags()
         if nstates is None:
@@ -691,10 +729,22 @@ class TDA(rhf.TDA):
                               verbose=log)
 
         nmo = self._scf.mo_occ[0].size
+        mo_energy = self._scf.mo_energy
+        mo_occ = self._scf.mo_occ
         nocca = (self._scf.mo_occ[0]>0).sum()
         noccb = (self._scf.mo_occ[1]>0).sum()
         nvira = nmo - nocca
         nvirb = nmo - noccb
+        if(hasattr(self._scf,'rew')):
+         if(self._scf.rew is not None): 
+          occidxa = numpy.where(numpy.logical_and(self._scf.rew[0]<mo_energy[0],mo_energy[0]<self._scf.rew[1]))[0]
+          occidxb = numpy.where(numpy.logical_and(self._scf.rew[0]<mo_energy[1],mo_energy[1]<self._scf.rew[1]))[0]
+          viridxa = numpy.where(mo_occ[0]==0)[0]
+          viridxb = numpy.where(mo_occ[1]==0)[0]
+          nocca = len(occidxa)
+          noccb = len(occidxb)
+          nvira = len(viridxa)
+          nvirb = len(viridxb)
         self.xy = [((xi[:nocca*nvira].reshape(nocca,nvira),  # X_alpha
                      xi[nocca*nvira:].reshape(noccb,nvirb)), # X_beta
                     (0, 0))  # (Y_alpha, Y_beta)
@@ -704,7 +754,7 @@ class TDA(rhf.TDA):
             lib.chkfile.save(self.chkfile, 'tdpdft/e', self.e)
             lib.chkfile.save(self.chkfile, 'tdpdft/xy', self.xy)
 
-        log.timer('TDA', *cpu0)
+        #log.timer('TDA', *cpu0)
         log.note('Excited State energies (eV)\n%s', self.e * nist.HARTREE2EV)
         return self.e, self.xy
 
@@ -732,11 +782,11 @@ def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     mo_occ = mf.mo_occ
     nao, nmo = mo_coeff[0].shape
     occidxa = numpy.where(mo_occ[0]>0)[0]
-    if(mf.rew is not None): 
-      occidxa = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy[0],mo_energy[0]<mf.rew[1]))[0]
     occidxb = numpy.where(mo_occ[1]>0)[0]
-    if(mf.rew is not None): 
-      occidxa = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy[1],mo_energy[1]<mf.rew[1]))[0]
+    if(hasattr(mf,'rew')):
+     if(mf.rew is not None): 
+      occidxa = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy[0],mo_energy[0]<mf.rew[1]))[0]
+      occidxb = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy[1],mo_energy[1]<mf.rew[1]))[0]
     viridxa = numpy.where(mo_occ[0]==0)[0]
     viridxb = numpy.where(mo_occ[1]==0)[0]
     nocca = len(occidxa)
@@ -781,7 +831,15 @@ def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
             xys[:,:,sym_forbid] = 0
 
         xs, ys = xys.transpose(1,0,2)
+        #print('OCC: ',nocca,noccb,nvira,nvirb)
+        #print('NZ: ',nz)
+        #print('XYS: ',xys.shape)
+        #print('XS: ',xs.shape)
+        #print('YS: ',ys.shape)
+        #print('NOA*NVA: ',nocca*nvira)
+        #print('NOB*NVB: ',noccb*nvirb)
         xa = xs[:,:nocca*nvira].reshape(nz,nocca,nvira)
+        #print(xa.shape)
         xb = xs[:,nocca*nvira:].reshape(nz,noccb,nvirb)
         ya = ys[:,:nocca*nvira].reshape(nz,nocca,nvira)
         yb = ys[:,nocca*nvira:].reshape(nz,noccb,nvirb)
@@ -790,6 +848,10 @@ def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
         dmsa += lib.einsum('xov,pv,qo->xpq', ya, orbva, orboa.conj())
         dmsb  = lib.einsum('xov,po,qv->xpq', xb, orbob, orbvb.conj())
         dmsb += lib.einsum('xov,pv,qo->xpq', yb, orbvb, orbob.conj())
+        
+        # BGJ fix 
+        dmsa = numpy.ascontiguousarray(dmsa)
+        dmsb = numpy.ascontiguousarray(dmsb)
 
         v1ao = vresp(numpy.asarray((dmsa,dmsb)))
 
@@ -827,7 +889,7 @@ class TDHF(TDA):
     def kernel(self, x0=None, nstates=None):
         '''TDHF diagonalization with non-Hermitian eigenvalue solver
         '''
-        cpu0 = (time.clock(), time.time())
+        #cpu0 = (time.clock(), time.time())
         self.check_sanity()
         self.dump_flags()
         if nstates is None:
@@ -861,6 +923,16 @@ class TDHF(TDA):
         noccb = (self._scf.mo_occ[1]>0).sum()
         nvira = nmo - nocca
         nvirb = nmo - noccb
+        if(hasattr(self._scf,'rew')):
+         if(self._scf.rew is not None): 
+          occidxa = numpy.where(numpy.logical_and(self._scf.rew[0]<self._scf.mo_energy[0],self._scf.mo_energy[0]<self._scf.rew[1]))[0]
+          occidxb = numpy.where(numpy.logical_and(self._scf.rew[0]<self._scf.mo_energy[1],self._scf.mo_energy[1]<self._scf.rew[1]))[0]
+          viridxa = numpy.where(self._scf.mo_occ[0]==0)[0]
+          viridxb = numpy.where(self._scf.mo_occ[1]==0)[0]
+          nocca = len(occidxa)
+          noccb = len(occidxb)
+          nvira = len(viridxa)
+          nvirb = len(viridxb)
         e = []
         xy = []
         for i, z in enumerate(x1):
@@ -880,7 +952,7 @@ class TDHF(TDA):
             lib.chkfile.save(self.chkfile, 'tdpdft/e', self.e)
             lib.chkfile.save(self.chkfile, 'tdpdft/xy', self.xy)
 
-        log.timer('TDPDFT', *cpu0)
+        #log.timer('TDPDFT', *cpu0)
         log.note('Excited State energies (eV)\n%s', self.e * nist.HARTREE2EV)
         return self.e, self.xy
 

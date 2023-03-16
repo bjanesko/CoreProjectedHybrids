@@ -50,6 +50,7 @@ def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
         wfnsym : int or str
             Point group symmetry irrep symbol or ID for excited CIS wavefunction.
     '''
+    print('Now in gen_tda_operation')
     mol = mf.mol
     mo_coeff = mf.mo_coeff
     assert(mo_coeff.dtype == numpy.double)
@@ -57,7 +58,8 @@ def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     mo_occ = mf.mo_occ
     nao, nmo = mo_coeff.shape
     occidx = numpy.where(mo_occ==2)[0]
-    if(mf.rew is not None): 
+    if(hasattr(mf,'rew')):
+     if(mf.rew is not None): 
       occidx = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy,mo_energy<mf.rew[1]))[0]
     else:
       print('rew none in gen_tda_operation')
@@ -91,7 +93,10 @@ def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     hdiag = hdiag.ravel()
 
     mo_coeff = numpy.asarray(numpy.hstack((orbo,orbv)), order='F')
-    vresp = mf.gen_response(singlet=singlet, hermi=0)
+    # BGJ 
+    # vresp = mf.gen_response(singlet=singlet, hermi=0)
+    print('Defining vresp in gen_tda_operation')
+    vresp = pdft_response_functions.pdft_rhf_response(mf, singlet=singlet, hermi=0)
 
     def vind(zs):
         zs = numpy.asarray(zs).reshape(-1,nocc,nvir)
@@ -101,6 +106,9 @@ def gen_tda_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
 
         # *2 for double occupancy
         dmov = lib.einsum('xov,po,qv->xpq', zs*2, orbo, orbv.conj())
+        # BGJ fix 
+        dmov = numpy.ascontiguousarray(dmov)
+
         v1ao = vresp(dmov)
         v1ov = lib.einsum('xpq,po,qv->xov', v1ao, orbo.conj(), orbv)
         v1ov += lib.einsum('xqs,sp->xqp', zs, fvv)
@@ -779,11 +787,16 @@ class TDA(lib.StreamObject):
         occidx = numpy.where(mo_occ==2)[0]
         if(mf.rew is not None): 
           occidx = numpy.where(numpy.logical_and(mf.rew[0]<mo_energy,mo_energy<mf.rew[1]))[0]
-        else:
-          print('rew none in init_guess') 
         viridx = numpy.where(mo_occ==0)[0]
+        #print('Generating TDSCF initial guess')
+        #print('Occupied orbitals used \n',occidx)
+        #print('Virtual orbitals used \n',viridx)
         e_ia = mo_energy[viridx] - mo_energy[occidx,None]
+        #print('e_ia shape: ',e_ia.shape)
         e_ia_max = e_ia.max()
+        #print('e_ia_max: ',e_ia_max)
+        e_ia_min = e_ia.min()
+        #print('e_ia_min: ',e_ia_min)
 
         if wfnsym is not None and mf.mol.symmetry:
             if isinstance(wfnsym, str):
@@ -795,21 +808,33 @@ class TDA(lib.StreamObject):
 
         nov = e_ia.size
         nstates = min(nstates, nov)
+        print('nov and nstates: ',nov,nstates)
         e_ia = e_ia.ravel()
+        # TEST. How does the guess code know which occ-virt pair corresponds to each Koopman's excitation? 
+        #for ii in range(nstates):
+        #  print('+++ ',ii,e_ia[numpy.argsort(e_ia)[ii]]) 
         e_threshold = min(e_ia_max, e_ia[numpy.argsort(e_ia)[nstates-1]])
         # Handle degeneracy, include all degenerated states in initial guess
         e_threshold += 1e-6
+        print('Threshold energy: ',e_threshold)
 
         idx = numpy.where(e_ia <= e_threshold)[0]
         x0 = numpy.zeros((idx.size, nov))
         for i, j in enumerate(idx):
-            x0[i, j] = 1  # Koopmans' excitations
+            x0[i, j] = 1  # Koopmans excitations
+            #print('Koopa ',i,j)
+        # BGJ 
+        #print('idx shape',idx.shape)
+        #print('x0 shape',x0.shape)
         return x0
 
     def kernel(self, x0=None, nstates=None):
         '''TDA diagonalization solver
         '''
         #cpu0 = (time.clock(), time.time())
+        # BGJ 
+        mo_occ = self._scf.mo_occ
+        mo_energy = self._scf.mo_energy
         self.check_sanity()
         self.dump_flags()
         if nstates is None:
@@ -836,9 +861,16 @@ class TDA(lib.StreamObject):
                               max_space=self.max_space, pick=pickeig,
                               verbose=log)
 
-        nocc = (self._scf.mo_occ>0).sum()
-        nmo = self._scf.mo_occ.size
-        nvir = nmo - nocc
+        # BGJ rearrange for REW calcs 
+        #nocc = (self._scf.mo_occ>0).sum()
+        #nmo = self._scf.mo_occ.size
+        #nvir = nmo - nocc
+        occidx = numpy.where(mo_occ==2)[0]
+        if(self._scf.rew is not None): 
+          occidx = numpy.where(numpy.logical_and(self._scf.rew[0]<mo_energy,mo_energy<self._scf.rew[1]))[0]
+        viridx = numpy.where(mo_occ==0)[0]
+        nocc = len(occidx)
+        nvir = len(viridx)
 # 1/sqrt(2) because self.x is for alpha excitation amplitude and 2(X^+*X) = 1
         self.xy = [(xi.reshape(nocc,nvir)*numpy.sqrt(.5),0) for xi in x1]
 
@@ -879,6 +911,7 @@ def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     [ A  B][X]
     [-B -A][Y]
     '''
+    print('Now in gen_tdhf_operation')
     mol = mf.mol
     mo_coeff = mf.mo_coeff
     assert(mo_coeff.dtype == numpy.double)
@@ -912,14 +945,15 @@ def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
     foo = numpy.diag(mo_energy[occidx])
     fvv = numpy.diag(mo_energy[viridx])
 
-    hdiag = (fvv.diagonal().reshape(-1,1) - foo.diagonal()).T
+    hdiag = fvv.diagonal() - foo.diagonal()[:,None]
     if wfnsym is not None and mol.symmetry:
         hdiag[sym_forbid] = 0
-    hdiag = numpy.hstack((hdiag.ravel(), hdiag.ravel()))
+    hdiag = numpy.hstack((hdiag.ravel(), -hdiag.ravel()))
+    #print('hdiag tdscf: ',hdiag)
 
     mo_coeff = numpy.asarray(numpy.hstack((orbo,orbv)), order='F')
     # BGJ 
-    # vresp = mf.gen_response(singlet=singlet, hermi=0)
+    #vresp = mf.gen_response(singlet=singlet, hermi=0)
     vresp = pdft_response_functions.pdft_rhf_response(mf, singlet=singlet, hermi=0)
 
     def vind(xys):
@@ -932,12 +966,21 @@ def gen_tdhf_operation(mf, fock_ao=None, singlet=True, wfnsym=None):
         xs, ys = xys.transpose(1,0,2,3)
         # dms = AX + BY
         # *2 for double occupancy
-        dms  = lib.einsum('xov,po,qv->xpq', xs*2, orbo, orbv.conj())
+        # BGJ Another mixup? 
+        # dms  = lib.einsum('xov,po,qv->xpq', xs*2, orbo, orbv.conj())
+        # dms += lib.einsum('xov,pv,qo->xpq', ys*2, orbv, orbo.conj())
+        dms  = lib.einsum('xov,qv,po->xpq', xs*2, orbv.conj(), orbo)
         dms += lib.einsum('xov,pv,qo->xpq', ys*2, orbv, orbo.conj())
 
+        # BGJ fix 
+        dms = numpy.ascontiguousarray(dms)
+
         v1ao = vresp(dms)
+        #print('v1ao tdscf: ',v1ao[0])
         v1ov = lib.einsum('xpq,po,qv->xov', v1ao, orbo.conj(), orbv)
-        v1vo = lib.einsum('xpq,pv,qo->xov', v1ao, orbv.conj(), orbo)
+        # BGJ another mixup ? Or no effect
+        #v1vo = lib.einsum('xpq,pv,qo->xov', v1ao, orbv.conj(), orbo)
+        v1vo = lib.einsum('xpq,qo,pv->xov', v1ao, orbo, orbv.conj())
         v1ov += lib.einsum('xqs,sp->xqp', xs, fvv)  # AX
         v1ov -= lib.einsum('xpr,sp->xsr', xs, foo)  # AX
         v1vo += lib.einsum('xqs,sp->xqp', ys, fvv)  # AY
@@ -1005,14 +1048,19 @@ class TDHF(TDA):
 
         # We only need positive eigenvalues
         def pickeig(w, v, nroots, envs):
+            thresh =  POSTIVE_EIG_THRESHOLD
+            if(self._scf.rew is not None): 
+              thresh = -1.0*self._scf.rew[1] - 0.5 # Adjust cutoff for REW calcs 
             realidx = numpy.where((abs(w.imag) < REAL_EIG_THRESHOLD) &
-                                  (w.real > POSTIVE_EIG_THRESHOLD))[0]
+                                  (w.real > thresh))[0]
+            #print('PICKING EIGENVALUES AT',thresh)
+            #print(w)
+            #print(realidx)
             # If the complex eigenvalue has small imaginary part, both the
             # real part and the imaginary part of the eigenvector can
             # approximately be used as the "real" eigen solutions.
             return lib.linalg_helper._eigs_cmplx2real(w, v, realidx,
                                                       real_eigenvectors=True)
-
         self.converged, w, x1 = \
                 lib.davidson_nosym1(vind, x0, precond,
                                     tol=self.conv_tol,
@@ -1030,12 +1078,14 @@ class TDHF(TDA):
         viridx = numpy.where(self._scf.mo_occ==0)[0]
         nocc = len(occidx)
         nvir = len(viridx)
-        #print('Nocc ',nocc,' nvir ',nvir,' occs ',self._scf.mo_occ)
+        print('Nocc ',nocc,' nvir ',nvir)
 
         self.e = w
+        # This renormalizes at the very very end. 
         def norm_xy(z):
             x, y = z.reshape(2,nocc,nvir)
             norm = lib.norm(x)**2 - lib.norm(y)**2
+            print('NORM ',lib.norm(x),lib.norm(y),norm)
             norm = numpy.sqrt(.5/norm)  # normalize to 0.5 for alpha spin
             return x*norm, y*norm
         self.xy = [norm_xy(z) for z in x1]

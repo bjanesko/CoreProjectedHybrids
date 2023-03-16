@@ -38,7 +38,8 @@ except (ImportError, OSError):
 #from pyscf.dft import xc
 #from pyscf.dft import rks
 from pdft import rks
-from pyscf.dft import roks
+#from pyscf.dft import roks
+from pdft import roks 
 #from pyscf.dft import uks
 from pdft import uks
 from pyscf.dft import gks
@@ -71,23 +72,23 @@ def RKS(mol, xc='LDA,VWN', paos='', phyb=0, rew=None, allc=0):
         return uks.UKS(mol, xc, paos, phyb, rew, allc)
     elif not mol.symmetry or mol.groupname == 'C1':
         if mol.spin > 0:
-            return roks.ROKS(mol, xc)
+            return roks.ROKS(mol, xc, paos, phyb, rew, allc)
         else:
             return rks.RKS(mol, xc, paos, phyb, rew, allc)
     else:
         if mol.spin > 0:
-            return rks_symm.ROKS(mol, xc)
+            return rks_symm.ROKS(mol, xc, paos, phyb, rew, allc)
         else:
             return rks_symm.RKS(mol, xc, paos, phyb, rew, allc)
 RKS.__doc__ = rks.RKS.__doc__
 
-def ROKS(mol, xc='LDA,VWN'):
+def ROKS(mol, xc='LDA,VWN', paos='', phyb=0, rew=None, allc=0):
     if mol.nelectron == 1:
-        return uks.UKS(mol)
+        return uks.UKS(mol, xc, paos, phyb, rew, allc)
     elif not mol.symmetry or mol.groupname == 'C1':
-        return roks.ROKS(mol, xc)
+        return roks.ROKS(mol, xc, paos, phyb, rew, allc)
     else:
-        return rks_symm.ROKS(mol, xc)
+        return rks_symm.ROKS(mol, xc, paos, phyb, rew, allc)
 ROKS.__doc__ = roks.ROKS.__doc__
 
 #def UKS(mol, xc='LDA,VWN'):

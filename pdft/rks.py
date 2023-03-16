@@ -81,9 +81,11 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     # exchange from pdm in the end. 
     if ks.QS is None:
         projwork.build_proj(ks)
-    temp = numpy.dot(dm,ks.SQ)
-    pdm = numpy.dot(ks.QS,temp)
-    #pdm = numpy.einsum('ik,kj->ij',ks.QS,numpy.einsum('ik,kj->ij',dm,ks.SQ))
+    pdm = []
+    for ip in range(len(ks.phyb)):
+      temp = numpy.dot(dm,ks.SQ[ip])
+      pdmthis = numpy.dot(ks.QS[ip],temp)
+      pdm.append(pdmthis)
 
     if ks.grids.coords is None:
         ks.grids.build(with_non0tab=True)
@@ -106,16 +108,17 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         max_memory = ks.max_memory - lib.current_memory()[0]
         n, exc, vxc = ni.nr_rks(mol, ks.grids, ks.xc, dm, max_memory=max_memory)
 
-        if(abs(ks.phyb)>1e-10): # BGJ projected semilocal XC 
+        # BGJ subtract off projected semilocal XC 
+        if(abs(sum(ks.phyb))>1e-10): 
           pxc = ks.xc 
           if(ks.allc>0):
             pxc=(pxc.split(','))[0] + ','
-            #print('Turning ',ks.xc,' to ',pxc)
-          np, excp, vxcp0 = ni.nr_rks(mol, ks.grids, pxc, pdm, max_memory=max_memory)
-          #print('N, NP, EXC, EXCP',n,np,exc,excp)
-          vxcp = numpy.einsum('ik,kj->ij',ks.SQ,numpy.einsum('ik,kj->ij',vxcp0,ks.QS))
-          vxc -= ks.phyb*vxcp 
-          exc -= ks.phyb*excp 
+          for ip in range(len(ks.phyb)):
+            np, excp, vxcp0 = ni.nr_rks(mol, ks.grids, pxc, pdm[ip], max_memory=max_memory)
+            #print('N, NP, EXC, EXCP',n,np,exc,excp)
+            vxcp = numpy.einsum('ik,kj->ij',ks.SQ[ip],numpy.einsum('ik,kj->ij',vxcp0,ks.QS[ip]))
+            vxc -= ks.phyb[ip]*vxcp 
+            exc -= ks.phyb[ip]*excp 
  
         if ks.nlc != '':
             assert('VV10' in ks.nlc.upper())
@@ -130,12 +133,13 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
 
     # BGJ Add exact exchange from the projected density matrix 
-    if(abs(ks.phyb)>1e-10):
-      vxxp0 = ks.get_k(mol,pdm,hermi) 
-      vxxp  = numpy.einsum('ik,kj->ij',ks.SQ,numpy.einsum('ik,kj->ij',vxxp0,ks.QS))
-      exxp  = numpy.einsum('ij,ji', pdm, vxxp0).real * .5  
-      vxc -= (ks.phyb*(1.-hyb)) * vxxp * .5 # factor of -.5 follows the global/RSH vxc vk term below 
-      exc -= (ks.phyb*(1.-hyb)) * exxp * .5
+    if(abs(sum(ks.phyb))>1e-10): 
+      for ip in range(len(ks.phyb)):
+        vxxp0 = ks.get_k(mol,pdm[ip],hermi) 
+        vxxp  = numpy.einsum('ik,kj->ij',ks.SQ[ip],numpy.einsum('ik,kj->ij',vxxp0,ks.QS[ip]))
+        exxp  = numpy.einsum('ij,ji', pdm[ip], vxxp0).real * .5  
+        vxc -= (ks.phyb[ip]*(1.-hyb)) * vxxp * .5 # factor of -.5 follows the global/RSH vxc vk term below 
+        exc -= (ks.phyb[ip]*(1.-hyb)) * exxp * .5
 
     if abs(hyb) < 1e-10 and abs(alpha) < 1e-10:
         vk = None
@@ -168,16 +172,15 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
                 vk += vklr
 
         # BGJ 
-        if(abs(ks.phyb)>1e-10):
-            #vkp0 = ks.get_k(mol, pdm, hermi)
-            #vkp0 *= hyb
-            if abs(omega) > 1e-10:
-                vklrp0 = ks.get_k(mol, pdm, hermi, omega=omega)
+        if(abs(sum(ks.phyb))>1e-10): 
+          if abs(omega) > 1e-10:
+            for ip in range(len(ks.phyb)):
+                vklrp0 = ks.get_k(mol, pdm[ip], hermi, omega=omega)
                 vklrp0 *= (alpha - hyb)
                 #vkp0 += vklrp0
                 vkp0 = vklrp0
-                vkp = numpy.einsum('ik,kj->ij',ks.SQ,numpy.einsum('ik,kj->ij',vkp0,ks.QS))
-                vk -= ks.phyb * vkp 
+                vkp = numpy.einsum('ik,kj->ij',ks.SQ[ip],numpy.einsum('ik,kj->ij',vkp0,ks.QS[ip]))
+                vk -= ks.phyb[ip] * vkp 
 
         vxc += vj - vk * .5
 
@@ -325,7 +328,7 @@ def define_xc_(ks, description, xctype='LDA', hyb=0, rsh=(0,0,0)):
     return ks
 
 
-def _pdft_common_init_(mf, xc='LDA,VWN', paos=None, phyb=0, rew=None, allc=0):
+def _pdft_common_init_(mf, xc='LDA,VWN', paos=None, phyb=[0], rew=None, allc=0):
     mf.xc = xc
     mf.paos = paos
     mf.phyb = phyb
@@ -357,10 +360,10 @@ class KohnShamPDFT(object):
             'NLC_name' for the NLC functional.  Default is '' (i.e., None)
         omega : float
             Omega of the range-separated Coulomb operator e^{-omega r_{12}^2} / r_{12}
-        phyb  : float 
-            Fraction of projected hybrid exchange to replace existing XC functional with. 
+        phyb  : list of floats 
+            Fraction of each projected hybrid exchange to replace existing XC functional with. 
         paos  : str
-            List, starting from zero, of the AOs in the projection. 
+            List of lists, starting from zero, of the AOs in each projection. 
         grids : Grids object
             grids.level (0 - 9)  big number for large mesh grids. Default is 3
 
@@ -425,7 +428,7 @@ class KohnShamPDFT(object):
         # BGJ 
         if self.paos is not None:
             logger.info(self, 'Projected AOs = %s', self.paos)
-            logger.info(self, 'Projection fraction AOs = %7.4f', self.phyb)
+            logger.info(self, 'Projection fraction AOs = %7.4f', self.phyb[0])
             if(self.rew is not None):
               logger.info(self, 'Projection REW cutoff = %7.4f %7.4f', self.rew[0],self.rew[1])
             logger.info(self, 'Projection correlation = %4d', self.allc)
@@ -552,7 +555,7 @@ def init_guess_by_vsap(mf, mol=None):
 class RKS(KohnShamPDFT, hf.RHF):
     __doc__ = '''Restricted Kohn-Sham\n''' + hf.SCF.__doc__ + KohnShamPDFT.__doc__
 
-    def __init__(self, mol, xc='LDA,VWN',paos=None,phyb=0, rew=None, allc=0):
+    def __init__(self, mol, xc='LDA,VWN',paos=None,phyb=[0], rew=None, allc=0):
         hf.RHF.__init__(self, mol)
         KohnShamPDFT.__init__(self, xc, paos, phyb, rew, allc)
 

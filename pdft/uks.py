@@ -42,11 +42,12 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     # BGJ 
     if ks.QS is None:
         projwork.build_proj(ks)
-    pdm = numpy.zeros(dm.shape)
-    for i in range(dm.shape[0]):
-      pdm[i] = numpy.einsum('ik,kj->ij',ks.QS,numpy.einsum('ik,kj->ij',dm[i],ks.SQ))
-
-    #t0 = (time.clock(), time.time())
+    pdm = []
+    for ip in range(len(ks.phyb)):
+      pdmthis = numpy.zeros(dm.shape)
+      for i in range(dm.shape[0]):
+        pdmthis[i] = numpy.einsum('ik,kj->ij',ks.QS[ip],numpy.einsum('ik,kj->ij',dm[i],ks.SQ[ip]))
+      pdm.append(pdmthis)
 
     if ks.grids.coords is None:
         ks.grids.build(with_non0tab=True)
@@ -67,14 +68,18 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         max_memory = ks.max_memory - lib.current_memory()[0]
         n, exc, vxc = ni.nr_uks(mol, ks.grids, ks.xc, dm, max_memory=max_memory)
 
-        if(abs(ks.phyb)>1e-10): # BGJ projected semilocal XC 
-          np, excp, vxcp0 = ni.nr_uks(mol, ks.grids, ks.xc, pdm, max_memory=max_memory)
-          #print('N, NP, EXC, EXCP',n,np,exc,excp)
-          vxcp= numpy.zeros(vxc.shape)
-          for i in range(vxc.shape[0]):
-            vxcp[i] = numpy.einsum('ik,kj->ij',ks.SQ,numpy.einsum('ik,kj->ij',vxcp0[i],ks.QS))
-          vxc -= ks.phyb*vxcp 
-          exc -= ks.phyb*excp 
+        # BGJ projected semilocal XC 
+        if(abs(sum(ks.phyb))>1e-10): 
+          pxc = ks.xc 
+          if(ks.allc>0):
+            pxc=(pxc.split(','))[0] + ','
+          for ip in range(len(ks.phyb)):
+            np, excp, vxcp0 = ni.nr_uks(mol, ks.grids, pxc,pdm[ip], max_memory=max_memory)
+            vxcp= numpy.zeros(vxc.shape)
+            for i in range(vxc.shape[0]):
+              vxcp[i] = numpy.einsum('ik,kj->ij',ks.SQ[ip],numpy.einsum('ik,kj->ij',vxcp0[i],ks.QS[ip]))
+            vxc -= ks.phyb[ip]*vxcp 
+            exc -= ks.phyb[ip]*excp 
 
         if ks.nlc != '':
             assert('VV10' in ks.nlc.upper())
@@ -89,16 +94,15 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     omega, alpha, hyb = ni.rsh_and_hybrid_coeff(ks.xc, spin=mol.spin)
 
     # BGJ Add exact exchange from the projected density matrix 
-    if(abs(ks.phyb)>1e-10):
-      vxxp0 = ks.get_k(mol,pdm,hermi) 
-      for i in range(vxc.shape[0]):
-        #vxxp0 = numpy.zeros(ks.SQ.shape)
-        vxxp  = numpy.einsum('ik,kj->ij',ks.SQ,numpy.einsum('ik,kj->ij',vxxp0[i],ks.QS))
-        exxp  = numpy.einsum('ij,ji', pdm[i], vxxp0[i]).real * .5 
-        #vxc[i] -= ks.phyb * vxxp 
-        #exc -= ks.phyb * exxp 
-        vxc[i] -= (ks.phyb*(1.-hyb)) * vxxp 
-        exc -= (ks.phyb*(1.-hyb)) * exxp 
+    if(abs(sum(ks.phyb))>1e-10): 
+      for ip in range(len(ks.phyb)):
+        pdmthis = pdm[ip]
+        vxxp0 = ks.get_k(mol,pdmthis,hermi) 
+        for i in range(vxc.shape[0]):
+          vxxp  = numpy.einsum('ik,kj->ij',ks.SQ[ip],numpy.einsum('ik,kj->ij',vxxp0[i],ks.QS[ip]))
+          exxp  = numpy.einsum('ij,ji', pdmthis[i], vxxp0[i]).real * .5 
+          vxc[i] -= (ks.phyb[ip]*(1.-hyb)) * vxxp 
+          exc -= (ks.phyb[ip]*(1.-hyb)) * exxp 
 
     if abs(hyb) < 1e-10 and abs(alpha) < 1e-10:
         vk = None
@@ -132,16 +136,15 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
                 vk += vklr
 
         # BGJ 
-        if(abs(ks.phyb)>1e-10):
-            for i in range(vxc.shape[0]):
-              #vkp0 = ks.get_k(mol, pdm[i], hermi)
-              #vkp0 *= hyb
-              if abs(omega) > 1e-10:
-                  vklrp0 = ks.get_k(mol, pdm[i], hermi, omega)
+        if(abs(sum(ks.phyb))>1e-10): 
+          if abs(omega) > 1e-10:
+            for ip in range(len(ks.phyb)):
+              pdmthis = pdm[ip]
+              for i in range(vxc.shape[0]):
+                  vklrp0 = ks.get_k(mol, pdmthis[i], hermi, omega)
                   vklrp0 *= (alpha - hyb)
-                  #vkp0 += vklrp0
                   vkp0 = vklrp0
-                  vk[i] -= ks.phyb*numpy.einsum('ik,kj->ij',ks.SQ,numpy.einsum('ik,kj->ij',vkp0,ks.QS))
+                  vk[i] -= ks.phyb[ip]*numpy.einsum('ik,kj->ij',ks.SQ[ip],numpy.einsum('ik,kj->ij',vkp0,ks.QS[ip]))
 
 
         vxc += vj - vk
@@ -215,7 +218,7 @@ def energy_elec(ks, dm=None, h1e=None, vhf=None):
 class UKS(rks.KohnShamPDFT, uhf.UHF):
     '''Unrestricted Kohn-Sham
     See pyscf/dft/rks.py RKS class for document of the attributes'''
-    def __init__(self, mol, xc='LDA,VWN',paos=None,phyb=0, rew=None, allc=0):
+    def __init__(self, mol, xc='LDA,VWN',paos=None,phyb=[0], rew=None, allc=0):
         uhf.UHF.__init__(self, mol)
         rks.KohnShamPDFT.__init__(self, xc,paos,phyb,rew,allc)
 

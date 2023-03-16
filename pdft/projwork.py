@@ -55,7 +55,7 @@ def assign_cores(m):
   return(CoreAOs)
 
 def mo_proj(ks):
-    ''' Build the projection operators QS and SQ from an input list of orthonormal MOs 
+    ''' Build a single projection operator from an input list of orthonormal MOs 
     Args:
         ks : an instance of :class:`RKS`
     '''  
@@ -72,14 +72,16 @@ def mo_proj(ks):
     for i in range(NC):
       v = orbs[:,i]
       Q = Q + numpy.outer(v,v)
-    ks.QS=numpy.einsum('ik,kj->ij',Q,S)
-    ks.SQ=numpy.einsum('ik,kj->ij',S,Q)
+    ks.QS=[numpy.einsum('ik,kj->ij',Q,S)]
+    ks.SQ=[numpy.einsum('ik,kj->ij',S,Q)]
     # DEBUG TEST 
     test = numpy.dot(Q,numpy.dot(S,Q))-Q
     print('TEST: ',numpy.sum(test*test),numpy.einsum('ij,ji->',S,Q))
 
 def build_mbproj(ks):
-    ''' Build the projection operators QS and SQ from existing basis core AOs 
+    ''' Build projection operators from the core AOs of an existing AO basis 
+    This version builds two projection operators: one for second-period
+    atoms Li-Ne, one for third-period atoms Na-Ar. 
     Args:
         ks : an instance of :class:`RKS`
     '''  
@@ -88,9 +90,11 @@ def build_mbproj(ks):
       S = ks.get_ovlp() 
       Sm = linalg.inv(S)
       N=(S.shape)[0]
-      Q    =numpy.zeros((N,N))
-      ks.QS=numpy.zeros((N,N))
-      ks.SQ=numpy.zeros((N,N))
+      Q2 = numpy.zeros((N,N))
+      Q3 = numpy.zeros((N,N))
+      ks.QS=[]
+      ks.SQ=[] 
+
       # Prepare dummy molecule with minimal basis set 
       md = m.copy()
       md.basis='321g'   
@@ -100,18 +104,24 @@ def build_mbproj(ks):
       # Build cross-overlap matrix between current and minimal core 
       SX = gto.intor_cross('int1e_ovlp',m,md)
       
-      # Find core minimal basis AOs 
+      # Find second- and third-period atom core minimal basis AOs 
       coreaos=[]
+      coreassign=[]
       labs = md.ao_labels()
       for iao in range(md.nao):
         icen = int(labs[iao].split()[0])
         iat = md.atom_charge(icen)
         if(iat>2 and   (' 1s' in labs[iao]) ):
            coreaos.append(iao)
-           print(labs[iao])
+           if(iat>10):
+             coreassign.append(3)
+           else: 
+             coreassign.append(2)
+           print(labs[iao],coreassign[-1])
         if(iat>10 and   (' 2s' in labs[iao] or ' 2p' in labs[iao]) ):
            coreaos.append(iao)
-           print(labs[iao])
+           coreassign.append(3)
+           print(labs[iao],coreassign[-1])
 
       # Build core minimal basis 
       NC = len(coreaos)
@@ -122,19 +132,43 @@ def build_mbproj(ks):
           SXC[:,ic] = SX[:,coreaos[ic]]
           for jc in range(NC):
              SC[ic,jc] = SM[coreaos[ic],coreaos[jc]]
-        SCm= linalg.inv(SC)
+
+        # Prepare two SC^(-1) operators, one for 2nd period elements and one for 3rd period elements 
+        # Assume that the ith orthogonalized core AO equals the ith core AO 
+        #SCm= linalg.inv(SC)
+        (vals,vecs) = linalg.eigh(SC)
+        SCm2 = numpy.zeros((NC,NC))
+        SCm3 = numpy.zeros((NC,NC))
+        SCmhalf = numpy.zeros((NC,NC))
+        for i in range(NC):
+          if(vals[i]>0.00000001):
+            SCmhalf[i,i] = ((vals[i]).real)**(-0.5)
+          else:
+            print('Eliminating overlap eigenvalue ',i,vals[i])
+        QCbig = numpy.dot(vecs,numpy.dot(SCmhalf,numpy.transpose(vecs)))
+        for ic in range(NC):
+          v = QCbig[ic]
+          Qset = numpy.outer(v,v)
+          if(coreassign[ic] == 3):
+            SCm3 = SCm3 + Qset 
+          else:
+            SCm2 = SCm2 + Qset 
       
-        # Core AO projection operator in current basis set 
+        # Core AO projection operators in current basis set 
         #Q = numpy.einsum('ia,ab,bc,dc,dj->ij',Sm,SXC,SCm,SXC,Sm)
         SmSXC= numpy.dot(Sm,SXC)
-        t2 = numpy.dot(SmSXC,SCm)
-        Q = numpy.dot(t2,numpy.transpose(SmSXC))
-        ks.QS=numpy.einsum('ik,kj->ij',Q,S)
-        ks.SQ=numpy.einsum('ik,kj->ij',S,Q)
+        t2 = numpy.dot(SmSXC,SCm2)
+        Q2 = numpy.dot(t2,numpy.transpose(SmSXC))
+        t2 = numpy.dot(SmSXC,SCm3)
+        Q3 = numpy.dot(t2,numpy.transpose(SmSXC))
+        ks.QS=[numpy.einsum('ik,kj->ij',Q2,S),numpy.einsum('ik,kj->ij',Q3,S)]
+        ks.SQ=[numpy.einsum('ik,kj->ij',S,Q2),numpy.einsum('ik,kj->ij',S,Q3)]
 
       # DEBUG TEST 
-      test = numpy.dot(Q,numpy.dot(S,Q))-Q
-      print('TEST: ',numpy.sum(test*test),numpy.einsum('ij,ji->',S,Q))
+      test = numpy.dot(Q2,numpy.dot(S,Q2))-Q2
+      test+= numpy.dot(Q3,numpy.dot(S,Q3))-Q3
+      test+= numpy.dot(Q2,numpy.dot(S,Q3))
+      print('TEST: ',numpy.sum(test*test),numpy.einsum('ij,ji->',S,Q2),numpy.einsum('ij,ji->',S,Q3))
 
 def old_build_mbproj(ks):
     ''' Build the projection operators QS and SQ from existing basis core AOs 
@@ -166,7 +200,7 @@ def old_build_mbproj(ks):
         iat = md.atom_charge(icen)
         if(iat>2 and   (' 1s' in labs[iao]) ):
            coreaos.append(iao)
-           print(labs[iao])
+           #print(labs[iao])
 
       # Build core minimal basis 
       NC = len(coreaos)
@@ -178,8 +212,8 @@ def old_build_mbproj(ks):
         SXC[:,ic] = SX[:,coreaos[ic]]
         for jc in range(NC):
            SC[ic,jc] = SM[coreaos[ic],coreaos[jc]]
-      print('SC ',SC)
-      print('SXC ',SXC)
+      #print('SC ',SC)
+      #print('SXC ',SXC)
       SXCT = numpy.transpose(SXC)
       
       # Build and orthogonalize projected core minimal basis set 
@@ -227,8 +261,11 @@ def build_proj(ks):
         elif('DAOs' in ks.paos):
           aoss = get_d(ks.mol)
         elif('AllAOs' in ks.paos):
+          aoss = [] 
+          aoss2 = []
           for i in range(ks.mol.nao):
-            aoss.append(i) 
+            aoss2.append(i) 
+          aoss.append(aoss2)
       elif(isinstance(ks.paos,list)):
         aoss = ks.paos 
       else:
@@ -238,14 +275,13 @@ def build_proj(ks):
         else:
           raise Exception('Not sure what paos is')
 
-      # If we are still here, aoss contains a list of AOs
+      # If we are still here, aoss contains a list of lists of AOs
       # to project onto. Orthogonalize and project. 
       print('AOs to project ',aoss)
       S = ks.get_ovlp() 
       N=(S.shape)[0]
-      Q    =numpy.zeros((N,N))
-      ks.QS=numpy.zeros((N,N))
-      ks.SQ=numpy.zeros((N,N))
+      ks.QS=[]
+      ks.SQ=[]
 
       # Do a symmetric orthogonalization, then assign orthogonalized vectors
       # to sets based on maximum overlap. We'll *assume* that the ith
@@ -258,12 +294,12 @@ def build_proj(ks):
         else:
            print('Eliminating overlap eigenvalue ',i,vals[i])
       Qbig = numpy.dot(vecs,numpy.dot(Smhalf,numpy.transpose(vecs)))
-      for i in aoss:
-        v = Qbig[i]
-        Q = Q + numpy.outer(v,v)
-      ks.QS=numpy.einsum('ik,kj->ij',Q,S)
-      ks.SQ=numpy.einsum('ik,kj->ij',S,Q)
- 
-      # DEBUG TEST 
-      test = numpy.dot(Q,numpy.dot(S,Q))-Q
-      print('TEST: ',numpy.sum(test*test),numpy.einsum('ij,ji->',S,Q))
+      for iset in range(len(aoss)):
+        Qset = numpy.zeros((N,N))
+        for i in aoss[iset]:
+          v = Qbig[i]
+          Qset = Qset + numpy.outer(v,v)
+        ks.QS.append(numpy.einsum('ik,kj->ij',Qset,S))
+        ks.SQ.append(numpy.einsum('ik,kj->ij',S,Qset))
+        test = numpy.dot(Qset,numpy.dot(S,Qset))-Qset
+        print('TEST: ',numpy.sum(test*test),numpy.einsum('ij,ji->',S,Qset))
