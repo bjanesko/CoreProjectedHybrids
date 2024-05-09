@@ -3,7 +3,7 @@
 import time
 import numpy
 from scipy import linalg
-from pyscf import gto 
+from pyscf import gto ,ao2mo
 
 def get_d(m):
   DAOs = [] 
@@ -358,7 +358,6 @@ def build_proj(ks):
 
 ######  May 2024 new functions for pDFT+UCI in projected atomic orbitals 
 def makeOPAOs(SAO,pAOs):
-  # Make block-orthogonalized pAOs from blocks of pAOs 
   opAOs=[]
   SopAOs=[]
   SAOopAOs=[]
@@ -366,19 +365,27 @@ def makeOPAOs(SAO,pAOs):
      pAO = pAOs[ishell]
      print('Shell ',ishell,' pAOs \n',pAO)
      nproj=pAO.shape[1]
+     print('Shell ',ishell,' nproj ',nproj)
      opAO = numpy.zeros_like(pAO)
-     Sshell = numpy.einsum('mp,mn,nq->pq',pAO,SAO,pAO)
+     #Sshell = numpy.einsum('mp,mn,nq->pq',pAO,SAO,pAO)
+     Sshell = numpy.dot(numpy.transpose(pAO),numpy.dot(SAO,pAO))
      print('Shell ',ishell,' pAO overlap \n',Sshell)
      (vals,vecs)=numpy.linalg.eigh(Sshell)
+     print('PAO eigenvalues \n',vals)
      for i in range(len(vals)):
       if(vals[i]>0.000001):
         vals[i]=vals[i]**(-0.5)
       else:
         vals[i]=0
-     opAO = numpy.einsum('mi,ij,j->mj',pAO,vecs,vals)
+      vecs[:,i]=vecs[:,i]*vals[i]
+     opAO = numpy.dot(pAO,vecs)
+     #opAO = numpy.einsum('mi,ij,j->mj',pAO,vecs,vals)
+     print('Shell ',ishell,' opAOs \n',opAO)
      opAOs.append(opAO) 
-     SopAOs.append(numpy.einsum('mi,mn,nj->ij',opAO,SAO,opAO))
-     SAOopAOs.append(numpy.einsum('mi,mn->ni',opAO,SAO))
+     #SopAOs.append(numpy.einsum('mi,mn,nj->ij',opAO,SAO,opAO))
+     SopAOs.append(numpy.dot(numpy.transpose(opAO),numpy.dot(SAO,opAO)))
+     #SAOopAOs.append(numpy.einsum('mi,mn->ni',opAO,SAO))
+     SAOopAOs.append(numpy.dot(SAO,opAO))
   return(opAOs,SopAOs,SAOopAOs)
 
 def makeallOPAOs(SAO,opAOs):
@@ -394,8 +401,10 @@ def makeallOPAOs(SAO,opAOs):
    for iao in range(opAOs[ishell].shape[1]):
      allopAO[:,j]=(opAOs[ishell])[:,iao]
      j=j+1
-  SAOallopAO = numpy.einsum('mi,mn->ni',allopAO,SAO)
-  SallopAO = numpy.einsum('mi,mn,nj->ij',allopAO,SAO,allopAO)
+  #SAOallopAO = numpy.einsum('mi,mn->ni',allopAO,SAO)
+  SAOallopAO = numpy.dot(SAO,allopAO)
+  #SallopAO = numpy.einsum('mi,mn,nj->ij',allopAO,SAO,allopAO)
+  SallopAO = numpy.dot(numpy.transpose(allopAO),numpy.dot(SAO,allopAO))
   return(allopAO,SallopAO,SAOallopAO)
 
 def pao_proj(ks):
@@ -414,25 +423,33 @@ def pao_proj(ks):
     opAO,SopAO,SAOopAO = makeallOPAOs(S,opAOs)
     SopAOm = numpy.linalg.inv(SopAO)
     Sm = numpy.linalg.inv(S)
-    Q = numpy.einsum('mn,ni,ij,oj,op->mp',Sm,SAOopAO,SopAOm,SAOopAO,Sm)
-    ks.QS=[numpy.einsum('ik,kj->ij',Q,S)]
-    ks.SQ=[numpy.einsum('ik,kj->ij',S,Q)]
+    #Q = numpy.einsum('mn,ni,ij,oj,op->mp',Sm,SAOopAO,SopAOm,SAOopAO,Sm)
+    temp=numpy.dot(Sm,SAOopAO)
+    Q = numpy.dot(numpy.dot(temp,SopAOm),numpy.transpose(temp))
+    #ks.QS=[numpy.einsum('ik,kj->ij',Q,S)]
+    #ks.SQ=[numpy.einsum('ik,kj->ij',S,Q)]
+    ks.QS=[numpy.dot(Q,S)]
+    ks.SQ=[numpy.dot(S,Q)]
     # DEBUG TEST 
     test = numpy.dot(Q,numpy.dot(S,Q))-Q
-    print('TEST: ',numpy.sum(test*test),numpy.einsum('ij,ji->',S,Q))
+    print('TEST: ',numpy.sum(test*test),numpy.dot(S,Q))
 
 def P_1to2(P1,S12,Sm2):
   # General function to convert density matrix P from basis 1 to basis 2 
   # given their overlap S12 and basis 2 inverse 
-  P2 = numpy.einsum('pr,mr,smn,nt,tq->spq',Sm2,S12,P1,S12,Sm2)
+  #P2 = numpy.einsum('pr,mr,smn,nt,tq->spq',Sm2,S12,P1,S12,Sm2)
+  temp=numpy.dot(S12,Sm2)
+  P2a = numpy.dot(numpy.transpose(temp),numpy.dot(P1[0],temp))
+  P2b = numpy.dot(numpy.transpose(temp),numpy.dot(P1[1],temp))
+  P2 = numpy.asarray([P2a,P2b])
   return(P2)
 
 def O1_1to2(O1,S12,Sm1):
   # General function to convert one-electron operator O1 from basis 1 to basis 2 
   # given their overlap S12 and basis 1 inverse 
   #O2 = numpy.einsum('mi,mn,no,op,pj->ij',S12,Sm1,O1,Sm1,S12)
-  tt = numpy.einsum('mi,mn->ni',S12,Sm1)
-  O2 = numpy.einsum('ni,np,pj->ij',tt,O1,tt)
+  temp=numpy.dot(Sm1,S12)
+  O2 = numpy.dot(numpy.transpose(temp),numpy.dot(O1,temp))
   return(O2)
 
 def O2_1to2(O1,S12,Sm1):
@@ -449,29 +466,51 @@ def euci(ks):
   # Set up 
   pAOs = ks.paos 
   m = ks.mol
+  nao = m.nao
   P = ks.make_rdm1() 
   S = ks.get_ovlp() 
   Sm = numpy.linalg.inv(S)
-  (mo_a,mo_b) = ks.mo_coeff
-  (e_a,e_b) = ks.mo_energy
-  nao = m.nao
+  if(len(P.shape)<3): # Convert RHF to UHF 
+    print('Converting RHF to UHF') 
+    Ptemp=P
+    P=numpy.zeros((2,nao,nao))
+    P[0]=Ptemp/2
+    P[1]=Ptemp/2
+    mo_a=ks.mo_coeff
+    mo_b=mo_a
+    e_a = ks.mo_energy 
+    e_b=e_a
+  else:
+    (mo_a,mo_b) = ks.mo_coeff
+    (e_a,e_b) = ks.mo_energy
   (Na,Nb)=m.nelec
   opAOs,SopAOs,SAOopAOs = makeOPAOs(S,pAOs)
   opAOf,SopAOf,SAOopAOf = makeallOPAOs(S,opAOs) 
 
   # Twoelec integrals in AO basis 
-  VeeAO = m.intor("int2e") 
+  #VeeAO = m.intor("int2e") 
 
   # Energy weighted density matrices 
   Pv=numpy.zeros_like(P)
-  Pv[0] = numpy.einsum('mi,ni->mn',mo_a[:,Na:],mo_a[:,Na:])
-  Pv[1] = numpy.einsum('mi,ni->mn',mo_b[:,Nb:],mo_b[:,Nb:])
+  #Pv[0] = numpy.einsum('mi,ni->mn',mo_a[:,Na:],mo_a[:,Na:])
+  #Pv[1] = numpy.einsum('mi,ni->mn',mo_b[:,Nb:],mo_b[:,Nb:])
+  Pv[0] = numpy.dot(mo_a[:,Na:],numpy.transpose(mo_a[:,Na:]))
+  Pv[1] = numpy.dot(mo_b[:,Nb:],numpy.transpose(mo_b[:,Nb:]))
   PE=numpy.zeros_like(P)
-  PE[0] = numpy.einsum('mi,i,ni->mn',mo_a[:,:Na],e_a[:Na],mo_a[:,:Na])
-  PE[1] = numpy.einsum('mi,i,ni->mn',mo_b[:,:Nb],e_b[:Nb],mo_b[:,:Nb])
+  #PE[0] = numpy.einsum('mi,i,ni->mn',mo_a[:,:Na],e_a[:Na],mo_a[:,:Na])
+  #PE[1] = numpy.einsum('mi,i,ni->mn',mo_b[:,:Nb],e_b[:Nb],mo_b[:,:Nb])
+  temp=numpy.einsum('mi,i->mi',mo_a[:,:Na],e_a[:Na])
+  print('TEST ',temp.shape,mo_a[:,:Na].shape)
+  PE[0] = numpy.dot(temp,numpy.transpose(mo_a[:,:Na]))
+  temp=numpy.einsum('mi,i->mi',mo_b[:,:Nb],e_b[:Nb])
+  PE[1] = numpy.dot(temp,numpy.transpose(mo_b[:,:Nb]))
   PvE=numpy.zeros_like(P)
-  PvE[0] = numpy.einsum('mi,i,ni->mn',mo_a[:,Na:],e_a[Na:],mo_a[:,Na:])
-  PvE[1] = numpy.einsum('mi,i,ni->mn',mo_b[:,Nb:],e_b[Nb:],mo_b[:,Nb:])
+  #PvE[0] = numpy.einsum('mi,i,ni->mn',mo_a[:,Na:],e_a[Na:],mo_a[:,Na:])
+  #PvE[1] = numpy.einsum('mi,i,ni->mn',mo_b[:,Nb:],e_b[Nb:],mo_b[:,Nb:])
+  temp=numpy.einsum('mi,i->mi',mo_a[:,Na:],e_a[Na:])
+  PvE[0] = numpy.dot(temp,numpy.transpose(mo_a[:,Na:]))
+  temp=numpy.einsum('mi,i->mi',mo_b[:,Nb:],e_b[Nb:])
+  PvE[1] = numpy.dot(temp,numpy.transpose(mo_b[:,Nb:]))
 
   # Indexing for projected natural orbitals 
   ntot=0
@@ -488,7 +527,13 @@ def euci(ks):
   itot=-1
   for ishell in range(len(opAOs)):
     SopAOm=numpy.linalg.inv(SopAOs[ishell])
-    Vees = O2_1to2(VeeAO,SAOopAOs[ishell],Sm)
+    #tt = numpy.einsum('mi,mn->ni',SAOopAOs[ishell],Sm)
+    tt = numpy.dot(Sm,SAOopAOs[ishell])
+    Vees2 = m.ao2mo(tt)
+    #print('TEST VEEs ',Vees2.shape)
+    Vees = ao2mo.restore(1,numpy.asarray(Vees2),tt.shape[1])
+    #print('TEST VEEs ',Vees.shape)
+    #Vees = O2_1to2(VeeAO,SAOopAOs[ishell],Sm)
 
     # Density matrices in this shell 
     Ps=P_1to2(P,SAOopAOs[ishell],SopAOm)
@@ -502,13 +547,15 @@ def euci(ks):
        itot = itot+1 
        v = vecs[:,iproj]
 
-       w0 = numpy.einsum('p,pq->q',v,SopAOf[shellstarts[ishell]:shellends[ishell]])
+       #w0 = numpy.einsum('p,pq->q',v,SopAOf[shellstarts[ishell]:shellends[ishell]])
+       w0 = numpy.dot(v,SopAOf[shellstarts[ishell]:shellends[ishell]])
        wt = numpy.dot(w0,w0)
        wts[itot]=wt
        print('Weight ',1/wt)
 
        # This should be sped up 
-       J = numpy.einsum('i,j,k,l,ijkl->',v,v,v,v,Vees)
+       J=numpy.dot(v,numpy.dot(v,numpy.dot(v,numpy.dot(v,Vees))))
+       #J = numpy.einsum('i,j,k,l,ijkl->',v,v,v,v,Vees)
        #PforU=numpy.zeros_like(Ps)
        #PforU[0]=numpy.einsum('m,n->mn',v,v)
        #PforUAO = P_1to2(PforU,numpy.transpose(SAOopAOs[ishell]),Sm)
@@ -516,10 +563,18 @@ def euci(ks):
        #J=numpy.einsum('ij,ji->',PforUAO[0],JforUAO[0])
 
        # Assemble the 2x2 Hamiltonian 
-       (noa,nob) = numpy.einsum('m,smn,n->s',v,Ps,v)
-       (nva,nvb) = numpy.einsum('m,smn,n->s',v,Pvs,v)
-       (eoa,eob) = numpy.einsum('m,smn,n->s',v,PEs,v)
-       (eva,evb) = numpy.einsum('m,smn,n->s',v,PvEs,v)
+       noa=numpy.dot(v,numpy.dot(Ps[0],v))
+       nob=numpy.dot(v,numpy.dot(Ps[1],v))
+       nva=numpy.dot(v,numpy.dot(Pvs[0],v))
+       nvb=numpy.dot(v,numpy.dot(Pvs[1],v))
+       eoa=numpy.dot(v,numpy.dot(PEs[0],v))
+       eob=numpy.dot(v,numpy.dot(PEs[1],v))
+       eva=numpy.dot(v,numpy.dot(PvEs[0],v))
+       evb=numpy.dot(v,numpy.dot(PvEs[1],v))
+       #(noa,nob) = numpy.einsum('m,smn,n->s',v,Ps,v)
+       #(nva,nvb) = numpy.einsum('m,smn,n->s',v,Pvs,v)
+       #(eoa,eob) = numpy.einsum('m,smn,n->s',v,PEs,v)
+       #(eva,evb) = numpy.einsum('m,smn,n->s',v,PvEs,v)
        if(noa>0.000001 and nob>0.000001 and nva>0.000001 and nvb>0.000001):
           eoa = eoa/(noa +0.00000001)
           eob = eob/(nob +0.00000001)
@@ -541,7 +596,9 @@ def euci(ks):
           ecs[itot]=ec
   wts1 = 1.0/wts
   wts2 = 1.0/(ecs*wts)
-  EC1 = numpy.einsum('s,s->',ecs,wts1) 
-  EC2 = numpy.einsum('s,s->',ecs**2,wts2) 
+  #EC1 = numpy.einsum('s,s->',ecs,wts1) 
+  #EC2 = numpy.einsum('s,s->',ecs**2,wts2) 
+  EC1 = numpy.dot(ecs,wts1)
+  EC2 = numpy.dot(ecs**2,wts2)
   return(EC1,EC2)
      

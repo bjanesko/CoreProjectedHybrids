@@ -46,7 +46,8 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     for ip in range(len(ks.phyb)):
       pdmthis = numpy.zeros(dm.shape)
       for i in range(dm.shape[0]):
-        pdmthis[i] = numpy.einsum('ik,kj->ij',ks.QS[ip],numpy.einsum('ik,kj->ij',dm[i],ks.SQ[ip]))
+        #pdmthis[i] = numpy.einsum('ik,kj->ij',ks.QS[ip],numpy.einsum('ik,kj->ij',dm[i],ks.SQ[ip]))
+        pdmthis[i] = numpy.dot(ks.QS[ip],numpy.dot(dm[i],ks.SQ[ip]))
       pdm.append(pdmthis)
 
     if ks.grids.coords is None:
@@ -77,7 +78,8 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
             np, excp, vxcp0 = ni.nr_uks(mol, ks.grids, pxc,pdm[ip], max_memory=max_memory)
             vxcp= numpy.zeros(vxc.shape)
             for i in range(vxc.shape[0]):
-              vxcp[i] = numpy.einsum('ik,kj->ij',ks.SQ[ip],numpy.einsum('ik,kj->ij',vxcp0[i],ks.QS[ip]))
+              # vxcp[i] = numpy.einsum('ik,kj->ij',ks.SQ[ip],numpy.einsum('ik,kj->ij',vxcp0[i],ks.QS[ip]))
+              vxcp[i] = numpy.dot(ks.SQ[ip],numpy.dot(vxcp0[i],ks.QS[ip]))
             vxc -= ks.phyb[ip]*vxcp 
             exc -= ks.phyb[ip]*excp 
 
@@ -99,8 +101,10 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
         pdmthis = pdm[ip]
         vxxp0 = ks.get_k(mol,pdmthis,hermi) 
         for i in range(vxc.shape[0]):
-          vxxp  = numpy.einsum('ik,kj->ij',ks.SQ[ip],numpy.einsum('ik,kj->ij',vxxp0[i],ks.QS[ip]))
-          exxp  = numpy.einsum('ij,ji', pdmthis[i], vxxp0[i]).real * .5 
+          #vxxp  = numpy.einsum('ik,kj->ij',ks.SQ[ip],numpy.einsum('ik,kj->ij',vxxp0[i],ks.QS[ip]))
+          vxxp  = numpy.dot(ks.SQ[ip],numpy.dot(vxxp0[i],ks.QS[ip]))
+          #exxp  = numpy.einsum('ij,ji', pdmthis[i], vxxp0[i]).real * .5 
+          exxp  = numpy.matrix.trace(numpy.dot(pdmthis[i], vxxp0[i])).real * .5 
           vxc[i] -= (ks.phyb[ip]*(1.-hyb)) * vxxp 
           exc -= (ks.phyb[ip]*(1.-hyb)) * exxp 
 
@@ -144,7 +148,8 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
                   vklrp0 = ks.get_k(mol, pdmthis[i], hermi, omega)
                   vklrp0 *= (alpha - hyb)
                   vkp0 = vklrp0
-                  vk[i] -= ks.phyb[ip]*numpy.einsum('ik,kj->ij',ks.SQ[ip],numpy.einsum('ik,kj->ij',vkp0,ks.QS[ip]))
+                  #vk[i] -= ks.phyb[ip]*numpy.einsum('ik,kj->ij',ks.SQ[ip],numpy.einsum('ik,kj->ij',vkp0,ks.QS[ip]))
+                  vk[i] -= ks.phyb[ip]*numpy.dot(ks.SQ[ip],numpy.dot(vkp0,ks.QS[ip]))
 
 
         vxc += vj - vk
