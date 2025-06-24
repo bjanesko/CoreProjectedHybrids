@@ -40,6 +40,7 @@ def get_veff(ks, mol=None, dm=None, dm_last=0, vhf_last=0, hermi=1):
     ground_state = (dm.ndim == 3 and dm.shape[0] == 2)
 
     # BGJ 
+    S = ks.mol.intor_symmetric('int1e_ovlp')
     if ks.QS is None:
         projwork.build_proj(ks)
     pdm = []

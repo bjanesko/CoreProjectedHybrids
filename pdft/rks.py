@@ -336,6 +336,7 @@ def _pdft_common_init_(mf, xc='LDA,VWN', paos=None, phyb=[0], rew=None, allc=0):
     mf.allc = allc
     mf.SQ = None 
     mf.QS = None 
+    mf.VeepAOs = None 
     mf.nlc = ''
     mf.grids = gen_grid.Grids(mf.mol)
     mf.grids.level = getattr(__config__, 'dft_rks_RKS_grids_level',
